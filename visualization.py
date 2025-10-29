@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import torch
-# from matplotlib.animation import FFMpegWriter
+from matplotlib.animation import FFMpegWriter
 import imageio_ffmpeg
 import matplotlib
 matplotlib.rcParams['animation.ffmpeg_path'] = imageio_ffmpeg.get_ffmpeg_exe()
