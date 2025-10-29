@@ -759,7 +759,7 @@ def main():
 
         # Example 2: Reconstruct a missing limb (e.g., the left hand)
         try:
-            joint_to_remove_idx = synthesizer.joint_names.index('lHand')
+            joint_to_remove_idx = synthesizer.joint_names.index('LeftHand')
             corrupted_missing, fixed_missing = synthesizer.fix_corrupted_motion(
                 sample_motion,
                 corruption_type='missing',
@@ -768,7 +768,7 @@ def main():
             output_path_missing = os.path.join(video_output_dir, f"correction_{i+1}_missing_limb.mp4")
             visualize_motion_comparison(corrupted_missing, fixed_missing, synthesizer.joint_parents, output_path_missing)
         except ValueError:
-            print("Could not find 'lHand' joint. Skipping missing limb visualization.")
+            print("Could not find the specified joint. Skipping missing limb visualization.")
 
     # --- Task 2: Motion Interpolation Videos ---
     print("\n--- Generating Motion Interpolation Videos ---")
