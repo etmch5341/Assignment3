@@ -680,6 +680,50 @@ def main():
     # For inference, you can load the dataset and model and use the synthesizer for different tasks. 
     # You can also use the visualization functions to visualize the results following examples in dataloader.py.
     
+    # print("\n===== 🎬 Generating Visualization Videos =====")
+
+    # # Create a directory to save the videos
+    # video_output_dir = os.path.join(output_dir, "videos")
+    # os.makedirs(video_output_dir, exist_ok=True)
+
+    # # Initialize the synthesizer with the newly trained model
+    # synthesizer = MotionManifoldSynthesizer(
+    #     model_path=os.path.join(output_dir, "models", "motion_autoencoder.pt"),
+    #     dataset=trainer.dataset  # Reuse the dataset loaded by the trainer
+    # )
+
+    # # Generate a few video examples
+    # num_examples = 3
+    # for i in range(num_examples):
+    #     print(f"\n--- Visualizing sample {i+1}/{num_examples} ---")
+        
+    #     # Get a sample from the validation set
+    #     sample_idx = len(trainer.train_dataset) + i 
+    #     sample_motion = trainer.dataset[sample_idx]
+
+    #     # --- Example 1: Fix motion with random data points zeroed out ---
+    #     corrupted_zero, fixed_zero = synthesizer.fix_corrupted_motion(
+    #         sample_motion,
+    #         corruption_type='zero',
+    #         corruption_params={'prob': 0.4} # Corrupt 40% of the data
+    #     )
+        
+    #     output_path_zero = os.path.join(video_output_dir, f"sample_{i}_fix_zero.mp4")
+    #     visualize_motion_comparison(corrupted_zero, fixed_zero, synthesizer.joint_parents, output_path_zero)
+
+    #     # --- Example 2: Reconstruct a missing arm ---
+    #     try:
+    #         joint_to_remove_idx = synthesizer.joint_names.index('lHand')
+    #         corrupted_missing, fixed_missing = synthesizer.fix_corrupted_motion(
+    #             sample_motion,
+    #             corruption_type='missing',
+    #             corruption_params={'joint_idx': joint_to_remove_idx}
+    #         )
+            
+    #         output_path_missing = os.path.join(video_output_dir, f"sample_{i}_fix_missing_limb.mp4")
+    #         visualize_motion_comparison(corrupted_missing, fixed_missing, synthesizer.joint_parents, output_path_missing)
+    #     except ValueError:
+    #         print("Could not find 'lHand' joint. Skipping missing limb visualization.")
     print("\n===== 🎬 Generating Visualization Videos =====")
 
     # Create a directory to save the videos
@@ -692,26 +736,26 @@ def main():
         dataset=trainer.dataset  # Reuse the dataset loaded by the trainer
     )
 
-    # Generate a few video examples
-    num_examples = 3
-    for i in range(num_examples):
-        print(f"\n--- Visualizing sample {i+1}/{num_examples} ---")
+    # --- Task 1: Motion Correction Videos ---
+    print("\n--- Generating Motion Correction Videos ---")
+    num_correction_examples = 2
+    for i in range(num_correction_examples):
+        print(f"  Processing correction sample {i+1}/{num_correction_examples}...")
         
         # Get a sample from the validation set
         sample_idx = len(trainer.train_dataset) + i 
         sample_motion = trainer.dataset[sample_idx]
 
-        # --- Example 1: Fix motion with random data points zeroed out ---
+        # Example 1: Fix motion with random data points zeroed out
         corrupted_zero, fixed_zero = synthesizer.fix_corrupted_motion(
             sample_motion,
             corruption_type='zero',
             corruption_params={'prob': 0.4} # Corrupt 40% of the data
         )
-        
-        output_path_zero = os.path.join(video_output_dir, f"sample_{i}_fix_zero.mp4")
+        output_path_zero = os.path.join(video_output_dir, f"correction_{i+1}_zero_corruption.mp4")
         visualize_motion_comparison(corrupted_zero, fixed_zero, synthesizer.joint_parents, output_path_zero)
 
-        # --- Example 2: Reconstruct a missing arm ---
+        # Example 2: Reconstruct a missing limb (e.g., the left hand)
         try:
             joint_to_remove_idx = synthesizer.joint_names.index('lHand')
             corrupted_missing, fixed_missing = synthesizer.fix_corrupted_motion(
@@ -719,11 +763,34 @@ def main():
                 corruption_type='missing',
                 corruption_params={'joint_idx': joint_to_remove_idx}
             )
-            
-            output_path_missing = os.path.join(video_output_dir, f"sample_{i}_fix_missing_limb.mp4")
+            output_path_missing = os.path.join(video_output_dir, f"correction_{i+1}_missing_limb.mp4")
             visualize_motion_comparison(corrupted_missing, fixed_missing, synthesizer.joint_parents, output_path_missing)
         except ValueError:
             print("Could not find 'lHand' joint. Skipping missing limb visualization.")
+
+    # --- Task 2: Motion Interpolation Videos ---
+    print("\n--- Generating Motion Interpolation Videos ---")
+    num_interpolation_examples = 2
+    for i in range(num_interpolation_examples):
+        print(f"  Processing interpolation sample {i+1}/{num_interpolation_examples}...")
+        
+        # Select two different motion clips to interpolate between
+        motion1_idx = len(trainer.train_dataset) + i + 10 # Use different indices to get varied motions
+        motion2_idx = len(trainer.train_dataset) + i + 20
+        
+        motion1 = trainer.dataset[motion1_idx]
+        motion2 = trainer.dataset[motion2_idx]
+        
+        # Perform the interpolation (t=0.5 for a 50/50 blend)
+        interpolated_motion = synthesizer.interpolate_motions(motion1, motion2, t=0.5)
+        
+        # Get the original local motions for visualization
+        motion1_local = motion1['positions']
+        motion2_local = motion2['positions']
+        
+        # Create the side-by-side-by-side video
+        output_path_interp = os.path.join(video_output_dir, f"interpolation_{i+1}.mp4")
+        visualize_interpolation(motion1_local, motion2_local, interpolated_motion, synthesizer.joint_parents, output_path_interp)
 
 
 if __name__ == "__main__":
