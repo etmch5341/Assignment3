@@ -2,7 +2,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import torch
-from matplotlib.animation import FFMpegWriter
+# from matplotlib.animation import FFMpegWriter
+import imageio_ffmpeg
+import matplotlib
+matplotlib.rcParams['animation.ffmpeg_path'] = imageio_ffmpeg.get_ffmpeg_exe()
 
 def visualize_motion_to_video(motion_tensor, joint_parents, output_path, fps=30, view_elevation=20, view_azimuth=45):
     """
