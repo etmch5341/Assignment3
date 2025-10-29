@@ -294,7 +294,14 @@ class MotionManifoldTrainer:
             for batch in progress_bar:
                 # TODO: Implement the training loop for the motion autoencoder.
                 # Use the normalized and flattened data for training
-                inputs = batch["positions_normalized_flat"].to(self.device)
+                # inputs = batch["positions_normalized_flat"].to(self.device)
+                # 1. Get all parts of the input data
+                positions = batch["positions_normalized_flat"].to(self.device)
+                trans_vel = batch["trans_vel_xz"].to(self.device)
+                rot_vel = batch["rot_vel_y"].to(self.device).unsqueeze(-1)  # Add a feature dimension
+
+                # 2. Concatenate them into a single tensor
+                inputs = torch.cat([positions, trans_vel, rot_vel], dim=2)
                 
                 # Zero the gradients
                 optimizer.zero_grad()
@@ -330,7 +337,14 @@ class MotionManifoldTrainer:
                 for batch in progress_bar:
                     # TODO: Implement the validation loop for the motion autoencoder.
                     # Use the normalized and flattened data for validation
-                    inputs = batch["positions_normalized_flat"].to(self.device)
+                    # inputs = batch["positions_normalized_flat"].to(self.device)
+                    # 1. Get all parts of the input data (same as in training loop)
+                    positions = batch["positions_normalized_flat"].to(self.device)
+                    trans_vel = batch["trans_vel_xz"].to(self.device)
+                    rot_vel = batch["rot_vel_y"].to(self.device).unsqueeze(-1)
+
+                    # 2. Concatenate them into a single tensor
+                    inputs = torch.cat([positions, trans_vel, rot_vel], dim=2)
                     
                     # Forward pass - no corruption during validation
                     reconstructed, _ = self.model(inputs)
