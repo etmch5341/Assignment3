@@ -225,6 +225,7 @@ class MotionManifoldTrainer:
             epochs=self.epochs,
             learning_rate=self.learning_rate,
             corruption_prob=0.1,  # Use denoising for the first phase
+            sparsity_weight=self.sparsity_weight,
             phase_name="initial"
         )
         
@@ -232,7 +233,8 @@ class MotionManifoldTrainer:
         finetune_stats = self._train_phase(
             epochs=self.fine_tune_epochs,
             learning_rate=self.fine_tune_lr,
-            corruption_prob=0.0,  # No corruption for fine-tuning
+            corruption_prob=0.0,  # No corruption for fine-tuning,
+            sparsity_weight=self.sparsity_weight,
             phase_name="fine_tune"
         )
         
