@@ -489,36 +489,84 @@ class MotionManifoldSynthesizer:
         else:
             raise FileNotFoundError(f"Model file not found at {model_path}")
     
+    # def fix_corrupted_motion(self, motion, corruption_type='zero', corruption_params=None):
+    #     """
+    #     Fix corrupted motion by projecting onto the manifold and recovering global motion
+        
+    #     Args:
+    #         motion: tensor of shape [batch_size, time_steps, joints, dims]
+    #         corruption_type: Type of corruption to apply ('zero', 'noise', or 'missing')
+    #         corruption_params: Parameters for corruption
+                    
+    #     Returns:
+    #         Tuple of (corrupted_motion, fixed_motion)
+    #     """
+    #     positions = motion['positions'].to(self.device)
+    #     # Store original shape
+    #     original_shape = positions.shape
+    #     batch_size, time_steps, joints, dims = original_shape
+        
+    #     # Apply corruption if not already corrupted
+    #     if corruption_params is not None:
+    #         corrupted_motion = self._apply_corruption(positions, corruption_type, corruption_params)
+    #     else:
+    #         corrupted_motion = positions.clone()
+            
+    #     # TODO: Fix the corrupted motion by your model.
+    #     # HINT: You need to normalize the corrupted motion and then project it onto the manifold using the model. Then unnormalize the fixed motion.
+    #     # HINT: If you like, you can recover global motion by calling recover_global_motion in dataloader.py
+    #     fixed_motion = None
+        
+    #     # Return corrupted motion and fixed motion with global transform applied
+    #     return corrupted_motion, fixed_motion
+    
     def fix_corrupted_motion(self, motion, corruption_type='zero', corruption_params=None):
         """
-        Fix corrupted motion by projecting onto the manifold and recovering global motion
+        Fix corrupted motion by projecting onto the manifold.
         
         Args:
-            motion: tensor of shape [batch_size, time_steps, joints, dims]
-            corruption_type: Type of corruption to apply ('zero', 'noise', or 'missing')
-            corruption_params: Parameters for corruption
+            motion: A dictionary containing motion data from the dataset.
+            corruption_type: Type of corruption to apply ('zero', 'noise', or 'missing').
+            corruption_params: Parameters for the corruption.
                     
         Returns:
-            Tuple of (corrupted_motion, fixed_motion)
+            A tuple of (corrupted_motion, fixed_motion) tensors.
         """
-        positions = motion['positions'].to(self.device)
-        # Store original shape
-        original_shape = positions.shape
-        batch_size, time_steps, joints, dims = original_shape
+        # Use local positions as the basis and add a batch dimension
+        positions = motion['positions'].unsqueeze(0).to(self.device)
         
-        # Apply corruption if not already corrupted
-        if corruption_params is not None:
-            corrupted_motion = self._apply_corruption(positions, corruption_type, corruption_params)
-        else:
-            corrupted_motion = positions.clone()
+        # Apply the specified corruption
+        corrupted_local_motion = self._apply_corruption(positions, corruption_type, corruption_params)
             
-        # TODO: Fix the corrupted motion by your model.
-        # HINT: You need to normalize the corrupted motion and then project it onto the manifold using the model. Then unnormalize the fixed motion.
-        # HINT: If you like, you can recover global motion by calling recover_global_motion in dataloader.py
-        fixed_motion = None
+        # 1. Normalize the corrupted data using the dataset's statistics
+        normalized_corrupted = (corrupted_local_motion - self.mean_pose) / self.std
         
-        # Return corrupted motion and fixed motion with global transform applied
-        return corrupted_motion, fixed_motion
+        # 2. Reshape and flatten for the model's input
+        batch_size, time_steps, joints, dims = normalized_corrupted.shape
+        normalized_corrupted_flat = normalized_corrupted.reshape(batch_size, time_steps, -1)
+
+        # 3. Get the corresponding velocity data
+        trans_vel = motion["trans_vel_xz"].unsqueeze(0).to(self.device)
+        rot_vel = motion["rot_vel_y"].unsqueeze(0).to(self.device).unsqueeze(-1)
+
+        # 4. Concatenate all features to create the final model input
+        model_input = torch.cat([normalized_corrupted_flat, trans_vel, rot_vel], dim=2)
+
+        # 5. Pass the data through the autoencoder (encode then decode)
+        with torch.no_grad():
+            reconstructed_output, _ = self.model(model_input)
+        
+        # 6. Isolate the reconstructed position data (excluding velocity channels)
+        reconstructed_positions_flat = reconstructed_output[:, :, :-3]
+        
+        # 7. Reshape the flat data back to (batch, time, joints, dims)
+        reconstructed_positions = reconstructed_positions_flat.reshape(batch_size, time_steps, joints, dims)
+        
+        # 8. Un-normalize the output to get the final fixed motion
+        fixed_local_motion = reconstructed_positions * self.std + self.mean_pose
+        
+        # Remove the batch dimension before returning
+        return corrupted_local_motion.squeeze(0), fixed_local_motion.squeeze(0)
     
     def _apply_corruption(self, motion, corruption_type, params):
         """Apply corruption to motion data"""
@@ -543,22 +591,66 @@ class MotionManifoldSynthesizer:
             
         return corrupted
     
+    # def interpolate_motions(self, motion1, motion2, t):
+    #     """
+    #     Interpolate between two motions on the manifold, handling global transforms
+        
+    #     Args:
+    #         motion1: tensor of shape [batch_size, time_steps, joints, dims]
+    #         motion2: tensor of shape [batch_size, time_steps, joints, dims]
+    #         t: Interpolation parameter (0 to 1)
+                    
+    #     Returns:
+    #         Interpolated motion as tensor of shape [batch_size, time_steps, joints, dims]
+    #     """
+    #     # TODO: Implement motion interpolation on the manifold.
+    #     # HINT: You can use the model to project the motions onto the manifold and then interpolate in the latent space.
+    #     # HINT: To simplify implementation, you could only implement the version where both motioins are local motions (without global transforms).
+    #     pass
+    
     def interpolate_motions(self, motion1, motion2, t):
         """
-        Interpolate between two motions on the manifold, handling global transforms
+        Interpolate between two motions on the manifold.
         
         Args:
-            motion1: tensor of shape [batch_size, time_steps, joints, dims]
-            motion2: tensor of shape [batch_size, time_steps, joints, dims]
-            t: Interpolation parameter (0 to 1)
+            motion1: The first motion dictionary from the dataset.
+            motion2: The second motion dictionary from the dataset.
+            t: The interpolation parameter (from 0.0 to 1.0).
                     
         Returns:
-            Interpolated motion as tensor of shape [batch_size, time_steps, joints, dims]
+            The interpolated motion as a tensor.
         """
-        # TODO: Implement motion interpolation on the manifold.
-        # HINT: You can use the model to project the motions onto the manifold and then interpolate in the latent space.
-        # HINT: To simplify implementation, you could only implement the version where both motioins are local motions (without global transforms).
-        pass
+        # Helper function to prepare a motion sample for the model
+        def prepare_input(motion):
+            positions = motion["positions_normalized_flat"].unsqueeze(0).to(self.device)
+            trans_vel = motion["trans_vel_xz"].unsqueeze(0).to(self.device)
+            rot_vel = motion["rot_vel_y"].unsqueeze(0).to(self.device).unsqueeze(-1)
+            return torch.cat([positions, trans_vel, rot_vel], dim=2)
+
+        model_input1 = prepare_input(motion1)
+        model_input2 = prepare_input(motion2)
+
+        with torch.no_grad():
+            # 1. Encode both motions to get their latent representations (z1, z2)
+            _, z1 = self.model(model_input1)
+            _, z2 = self.model(model_input2)
+
+            # 2. Linearly interpolate between the latent vectors
+            z_interp = torch.lerp(z1, z2, t)
+
+            # 3. Decode the new interpolated latent vector
+            reconstructed_output = self.model.decode(z_interp)
+
+        # 4. Isolate, reshape, and un-normalize the position data
+        reconstructed_positions_flat = reconstructed_output[:, :, :-3]
+        batch_size, time_steps, _ = reconstructed_positions_flat.shape
+        num_joints = len(self.joint_names)
+        
+        reconstructed_positions = reconstructed_positions_flat.reshape(batch_size, time_steps, num_joints, 3)
+        interpolated_local_motion = reconstructed_positions * self.std + self.mean_pose
+        
+        # Remove the batch dimension and return the result
+        return interpolated_local_motion.squeeze(0)
     
     # You can add more functions for Extra Credit.
     
@@ -587,6 +679,51 @@ def main():
     
     # For inference, you can load the dataset and model and use the synthesizer for different tasks. 
     # You can also use the visualization functions to visualize the results following examples in dataloader.py.
+    
+    print("\n===== 🎬 Generating Visualization Videos =====")
+
+    # Create a directory to save the videos
+    video_output_dir = os.path.join(output_dir, "videos")
+    os.makedirs(video_output_dir, exist_ok=True)
+
+    # Initialize the synthesizer with the newly trained model
+    synthesizer = MotionManifoldSynthesizer(
+        model_path=os.path.join(output_dir, "models", "motion_autoencoder.pt"),
+        dataset=trainer.dataset  # Reuse the dataset loaded by the trainer
+    )
+
+    # Generate a few video examples
+    num_examples = 3
+    for i in range(num_examples):
+        print(f"\n--- Visualizing sample {i+1}/{num_examples} ---")
+        
+        # Get a sample from the validation set
+        sample_idx = len(trainer.train_dataset) + i 
+        sample_motion = trainer.dataset[sample_idx]
+
+        # --- Example 1: Fix motion with random data points zeroed out ---
+        corrupted_zero, fixed_zero = synthesizer.fix_corrupted_motion(
+            sample_motion,
+            corruption_type='zero',
+            corruption_params={'prob': 0.4} # Corrupt 40% of the data
+        )
+        
+        output_path_zero = os.path.join(video_output_dir, f"sample_{i}_fix_zero.mp4")
+        visualize_motion_comparison(corrupted_zero, fixed_zero, synthesizer.joint_parents, output_path_zero)
+
+        # --- Example 2: Reconstruct a missing arm ---
+        try:
+            joint_to_remove_idx = synthesizer.joint_names.index('lHand')
+            corrupted_missing, fixed_missing = synthesizer.fix_corrupted_motion(
+                sample_motion,
+                corruption_type='missing',
+                corruption_params={'joint_idx': joint_to_remove_idx}
+            )
+            
+            output_path_missing = os.path.join(video_output_dir, f"sample_{i}_fix_missing_limb.mp4")
+            visualize_motion_comparison(corrupted_missing, fixed_missing, synthesizer.joint_parents, output_path_missing)
+        except ValueError:
+            print("Could not find 'lHand' joint. Skipping missing limb visualization.")
 
 
 if __name__ == "__main__":
