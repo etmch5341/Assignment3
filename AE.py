@@ -550,7 +550,7 @@ def main():
     """Example usage of the motion manifold training"""
     
     # Training parameters
-    data_dir = "path/to/cmu-mocap"
+    data_dir = "./cmu-mocap" # "path/to/cmu-mocap"
     output_dir = "./output/ae"
     
     trainer = MotionManifoldTrainer(
