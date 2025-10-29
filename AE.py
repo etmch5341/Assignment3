@@ -735,6 +735,8 @@ def main():
         model_path=os.path.join(output_dir, "models", "motion_autoencoder.pt"),
         dataset=trainer.dataset  # Reuse the dataset loaded by the trainer
     )
+    
+    print(" Available joint names:", synthesizer.joint_names)
 
     # --- Task 1: Motion Correction Videos ---
     print("\n--- Generating Motion Correction Videos ---")
