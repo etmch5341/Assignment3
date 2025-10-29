@@ -365,10 +365,10 @@ class MotionManifoldTrainer:
             print(f"Epoch {epoch+1}/{epochs} -> Train Loss: {avg_train_loss:.6f}, Val Loss: {avg_val_loss:.6f}")
             
             # Save if best model. You can also save checkpoints each epoch if needed.
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                self._save_checkpoint(epoch, end=f'_valloss_{val_loss:.6f}', phase_name=phase_name)
-                print(f"  Saved checkpoint with val_loss: {val_loss:.6f}")
+            if avg_val_loss < best_val_loss:
+                best_val_loss = avg_val_loss
+                self._save_checkpoint(epoch, end=f'_valloss_{avg_val_loss:.6f}', phase_name=phase_name)
+                print(f"  Saved checkpoint with val_loss: {avg_val_loss:.6f}")
         
         return stats
     
