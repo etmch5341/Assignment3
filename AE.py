@@ -132,7 +132,7 @@ class MotionManifoldTrainer:
     def _load_dataset(self):
         """Load the CMU Motion dataset and create training/validation splits"""
         # Create dataset
-        from dataloader2 import CMUMotionDataset
+        # from dataloader2 import CMUMotionDataset
         
         self.dataset = CMUMotionDataset(
             data_dir=self.data_dir,
