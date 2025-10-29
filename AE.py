@@ -330,7 +330,7 @@ class MotionManifoldTrainer:
             
             # Validation
             self.model.eval()
-            val_loss = 0
+            total_val_loss = 0.0
             
             with torch.no_grad():
                 progress_bar = tqdm(self.val_loader, desc=f"Epoch {epoch+1}/{epochs} [Val]")
