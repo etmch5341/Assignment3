@@ -93,7 +93,8 @@ def generate_tsne_visualization(model_path, data_dir, output_file, sample_size=1
     plt.grid(True, alpha=0.2)
     
     # Create a legend (can be crowded if many subjects, but useful)
-    plt.legend(handles=scatter.legend_elements(num=len(unique_labels))[0], labels=unique_labels, title="Subject ID")
+    # plt.legend(handles=scatter.legend_elements(num=len(unique_labels))[0], labels=unique_labels, title="Subject ID")
+    plt.legend(handles=scatter.legend_elements(num=len(unique_labels))[0], labels=unique_labels.tolist(), title="Subject ID")
 
     plt.savefig(output_file)
     plt.close()
