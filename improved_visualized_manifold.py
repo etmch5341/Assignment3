@@ -14,7 +14,7 @@ def generate_tsne_visualization(model_path, data_dir, output_file, sample_size=1
     """
     Generates a t-SNE visualization of the learned motion manifold, colored by motion type.
     """
-    print("🚀 Starting manifold visualization...")
+    print("Starting manifold visualization...")
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
