@@ -168,7 +168,8 @@ def generate_motion_examples():
             masked_viz, completed_motion = synthesizer.complete_partial_motion(
                 sample_motion, 
                 inpaint_mask,
-                num_iterations=200
+                num_iterations=200,
+                transition_weight=1.0
             )
             
             output_path = os.path.join(comp_dir, f"inpaint_{i+1:02d}_(gap_frames_{keep_size}-{window_size-keep_size}).mp4")
@@ -194,7 +195,8 @@ def generate_motion_examples():
             masked_viz, completed_motion = synthesizer.complete_partial_motion(
                 sample_motion, 
                 outpaint_mask,
-                num_iterations=200
+                num_iterations=200,
+                transition_weight=1.0
             )
             
             output_path = os.path.join(comp_dir, f"outpaint_{i+1:02d}_(extend_from_frame_{keep_frames}).mp4")

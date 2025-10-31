@@ -658,85 +658,87 @@ class MotionManifoldSynthesizer:
         return interpolated_local_motion.squeeze(0)
     
     def complete_partial_motion(
-        self, 
-        motion_sample: Dict, 
-        mask: torch.Tensor, 
-        num_iterations: int = 200, 
-        learning_rate: float = 0.01
+        self,
+        motion_sample: Dict,
+        mask: torch.Tensor,
+        num_iterations: int = 200,
+        learning_rate: float = 0.01,
+        transition_weight: float = 1.0  # New parameter for smoothness
     ):
         """
         Completes a partially known motion sequence using manifold projection.
-
-        Args:
-            motion_sample: A single sample dictionary from the dataset.
-            mask: A 1D tensor of shape [time_steps] with 1s for known frames and 0s for unknown.
-            num_iterations: Number of optimization iterations.
-            learning_rate: Learning rate for the optimization.
-
-        Returns:
-            A tuple of (masked_motion, completed_motion) tensors in [time, joints, 3] format.
+        (Improved version with better initialization and transition loss)
         """
         self.model.eval()
         
         # --- 1. Prepare Initial Tensors ---
-        
-        # Ensure mask is on the correct device
         mask = mask.to(self.device)
-        
-        # Prepare the full model input (normalized positions + velocities)
         positions = motion_sample["positions_normalized_flat"].unsqueeze(0).to(self.device)
         trans_vel = motion_sample["trans_vel_xz"].unsqueeze(0).to(self.device)
         rot_vel = motion_sample["rot_vel_y"].unsqueeze(0).to(self.device).unsqueeze(-1)
         
-        # X_known is the ground truth, full, normalized motion
         X_known = torch.cat([positions, trans_vel, rot_vel], dim=2)
+        b, t, d_feat = X_known.shape
         
-        # Expand mask from [time_steps] to [1, time_steps, features]
         mask_expanded = mask.view(1, -1, 1).expand_as(X_known)
         
-        # X_optim is our optimization variable.
-        # We initialize it with the known frames and zeros for unknown frames.
-        X_optim = nn.Parameter(X_known * mask_expanded, requires_grad=True)
+        # --- 2. Smarter Initialization ---
+        # Find the last known frame index from the mask
+        known_indices = (mask == 1).nonzero(as_tuple=True)[0]
+        X_init = X_known * mask_expanded
         
-        # Get the un-normalized original positions for visualization
+        if len(known_indices) > 0 and known_indices.max() < t - 1:
+            last_known_idx = known_indices.max()
+            # Get the data from the last known frame
+            last_known_frame_data = X_known[:, last_known_idx, :].unsqueeze(1)
+            # Fill all subsequent unknown frames with this data
+            X_init[:, last_known_idx + 1:, :] = last_known_frame_data.expand(-1, t - (last_known_idx + 1), -1)
+
+        X_optim = nn.Parameter(X_init, requires_grad=True)
+
+        # Visualization of the masked input (un-normalized)
         original_positions = motion_sample['positions'].unsqueeze(0).to(self.device)
         viz_mask_expanded = mask.view(1, -1, 1, 1).expand_as(original_positions)
         masked_motion_viz = (original_positions * viz_mask_expanded).squeeze(0)
 
-        # --- 2. Setup Optimizer ---
-        # We are optimizing the input tensor X_optim, not the model weights
+        # --- 3. Setup Optimizer ---
         optimizer = optim.Adam([X_optim], lr=learning_rate)
         
-        # --- 3. Iterative Refinement Loop ---
+        # --- 4. Iterative Refinement Loop ---
         for _ in range(num_iterations):
             optimizer.zero_grad()
             
-            # Step A: Pass the current guess through the autoencoder
             X_reconstructed, _ = self.model(X_optim)
             
-            # Step B: Calculate the reconstruction loss (how plausible is the motion?)
-            # We only care about the loss on the parts we *don't* know
-            L_recon = F.mse_loss(X_reconstructed * (1 - mask_expanded), X_optim * (1 - mask_expanded))
+            # Manifold Loss (L_recon): How plausible is the motion?
+            L_manifold = F.mse_loss(X_reconstructed * (1 - mask_expanded), X_optim * (1 - mask_expanded))
             
-            # Step C: Optimize for plausibility
-            L_recon.backward()
+            # --- NEW: Transition Loss ---
+            # Penalize discontinuities between known and generated frames
+            L_transition = 0.0
+            if len(known_indices) > 0 and known_indices.max() < t - 1:
+                last_known_idx = known_indices.max()
+                known_frame = X_reconstructed[:, last_known_idx, :]
+                first_unknown_frame = X_reconstructed[:, last_known_idx + 1, :]
+                L_transition = F.mse_loss(first_unknown_frame, known_frame)
+            
+            # Total loss combines manifold plausibility and transition smoothness
+            L_total = L_manifold + transition_weight * L_transition
+            
+            L_total.backward()
             optimizer.step()
             
-            # Step D: Enforce constraints (project known frames back)
-            # This is the crucial step!
+            # Enforce constraints: Reset known frames to their ground truth values
             with torch.no_grad():
                 X_optim.data.copy_(X_optim.data * (1 - mask_expanded) + X_known.data * mask_expanded)
 
-        # --- 4. Final Result ---
-        # The loop is finished, X_optim now contains the completed motion
+        # --- 5. Final Result ---
         completed_normalized_flat = X_optim.detach()
-        
-        # Isolate, reshape, and un-normalize the position data
         pos_flat = completed_normalized_flat[:, :, :positions.shape[2]]
         b, t, _ = pos_flat.shape
-        j, d = self.mean_pose.shape
+        j, d_pos = self.mean_pose.shape
         
-        completed_normalized = pos_flat.reshape(b, t, j, d)
+        completed_normalized = pos_flat.reshape(b, t, j, d_pos)
         completed_motion = completed_normalized * self.std + self.mean_pose
         
         return masked_motion_viz.cpu(), completed_motion.squeeze(0).cpu()
@@ -753,37 +755,30 @@ class MotionManifoldSynthesizer:
     ):
         """
         Transfers the style of one motion to the content of another via optimization.
-
-        Args:
-            content_motion: The motion sample providing the content (local poses).
-            style_motion: The motion sample providing the style (global trajectory).
-            num_iterations: Number of optimization iterations.
-            learning_rate: Learning rate for the optimization.
-            content_weight: Weight for the content loss (lambda_c).
-            style_weight: Weight for the style loss (lambda_s).
-            manifold_weight: Weight for the manifold/realism loss (lambda_m).
-
-        Returns:
-            The final motion with transferred style as a tensor.
+        (Optimized version)
         """
         self.model.eval()
 
-        # --- 1. Prepare Target Tensors ---
-        # Content Target: The local poses from the content motion.
+        # --- 1. Prepare Target Tensors (Move to device *before* the loop) ---
         content_local_positions = content_motion['positions'].unsqueeze(0).to(self.device)
+        
+        # Get style velocities and move to device
+        style_trans_vel = style_motion['trans_vel_xz'].unsqueeze(0).to(self.device)
+        style_rot_vel = style_motion['rot_vel_y'].unsqueeze(0).to(self.device)
 
-        # Style Target: The global root trajectory from the style motion.
-        # We get this by recovering the global motion and isolating the root joint (joint 0).
+        # Recover and store the target style trajectory
         style_global_motion = recover_global_motion(
-            style_motion['positions'].unsqueeze(0),
-            style_motion['trans_vel_xz'].unsqueeze(0),
-            style_motion['rot_vel_y'].unsqueeze(0)
+            style_motion['positions'].unsqueeze(0).to(self.device),
+            style_trans_vel,
+            style_rot_vel
         )
-        style_root_trajectory = style_global_motion[:, :, 0, :].to(self.device) # Shape: [1, time, 3]
+        style_root_trajectory = style_global_motion[:, :, 0, :].clone()
+
+        # Get content velocities and move to device
+        content_trans_vel = content_motion['trans_vel_xz'].unsqueeze(0).to(self.device)
+        content_rot_vel = content_motion['rot_vel_y'].unsqueeze(0).to(self.device).unsqueeze(-1)
 
         # --- 2. Initialize Optimization Variable ---
-        # The variable we optimize is the local motion of our new sequence.
-        # We initialize it with the content motion's local poses.
         X_optim_local = nn.Parameter(content_local_positions.clone(), requires_grad=True)
 
         # --- 3. Setup Optimizer ---
@@ -794,49 +789,37 @@ class MotionManifoldSynthesizer:
             optimizer.zero_grad()
 
             # --- Calculate Content Loss ---
-            # We want the output's local poses to match the content's.
-            # Focusing on feet (joints 4, 10) can improve results, but all joints work too.
             foot_indices = [4, 10]
             L_content = F.mse_loss(X_optim_local[:, :, foot_indices, :], content_local_positions[:, :, foot_indices, :])
 
             # --- Calculate Style Loss ---
-            # We need the global trajectory of our *current optimized motion*.
-            # We use the style motion's velocities to drive the reconstruction.
             output_global_motion = recover_global_motion(
                 X_optim_local,
-                style_motion['trans_vel_xz'].unsqueeze(0).to(self.device),
-                style_motion['rot_vel_y'].unsqueeze(0).to(self.device)
+                style_trans_vel,
+                style_rot_vel
             )
             output_root_trajectory = output_global_motion[:, :, 0, :]
             L_style = F.mse_loss(output_root_trajectory, style_root_trajectory)
 
             # --- Calculate Manifold (Realism) Loss ---
-            # Normalize and prepare the current motion for the autoencoder.
             normalized_optim = (X_optim_local - self.mean_pose) / self.std
             b, t, j, d = normalized_optim.shape
             normalized_optim_flat = normalized_optim.reshape(b, t, -1)
             
-            # Use content velocities as they are part of the 'what' is happening.
-            trans_vel_content = content_motion['trans_vel_xz'].unsqueeze(0).to(self.device)
-            rot_vel_content = content_motion['rot_vel_y'].unsqueeze(0).to(self.device).unsqueeze(-1)
-            model_input = torch.cat([normalized_optim_flat, trans_vel_content, rot_vel_content], dim=2)
-
-            # Pass through the autoencoder and calculate reconstruction loss.
+            model_input = torch.cat([normalized_optim_flat, content_trans_vel, content_rot_vel], dim=2)
             reconstructed_output, _ = self.model(model_input)
             L_manifold = F.mse_loss(reconstructed_output, model_input)
 
             # --- Total Loss and Optimization Step ---
             L_total = (content_weight * L_content +
-                       style_weight * L_style +
-                       manifold_weight * L_manifold)
+                    style_weight * L_style +
+                    manifold_weight * L_manifold)
             
             L_total.backward()
             optimizer.step()
 
         # --- 5. Final Result ---
-        # The loop is finished, X_optim_local now contains the new motion.
         edited_motion = X_optim_local.detach().squeeze(0).cpu()
-
         return edited_motion
     
     # You can add more functions for Extra Credit.
