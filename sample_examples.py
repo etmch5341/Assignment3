@@ -38,6 +38,7 @@ def generate_motion_examples():
     # Setup paths and device
     os.makedirs(os.path.join(OUTPUT_DIR, "interpolations"), exist_ok=True)
     os.makedirs(os.path.join(OUTPUT_DIR, "corruptions"), exist_ok=True)
+    os.makedirs(os.path.join(OUTPUT_DIR, "completions"), exist_ok=True)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
