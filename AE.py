@@ -781,28 +781,32 @@ class MotionManifoldSynthesizer:
     ):
         """
         Transfers the style of one motion to the content of another via optimization.
-        (Optimized version)
+        (FIXED version)
         """
         self.model.eval()
 
         # --- 1. Prepare Target Tensors (Move to device *before* the loop) ---
         content_local_positions = content_motion['positions'].unsqueeze(0).to(self.device)
         
+        # ### FIX 1: Load all velocities, keeping names clear for flat (b,t) vs. model-ready (b,t,f)
         # Get style velocities and move to device
-        style_trans_vel = style_motion['trans_vel_xz'].unsqueeze(0).to(self.device)
-        style_rot_vel = style_motion['rot_vel_y'].unsqueeze(0).to(self.device)
+        style_trans_vel = style_motion['trans_vel_xz'].unsqueeze(0).to(self.device)     # (b, t, 2)
+        style_rot_vel_flat = style_motion['rot_vel_y'].unsqueeze(0).to(self.device)     # (b, t)
+        
+        # Get content velocities and move to device
+        content_trans_vel = content_motion['trans_vel_xz'].unsqueeze(0).to(self.device) # (b, t, 2)
+        content_rot_vel_flat = content_motion['rot_vel_y'].unsqueeze(0).to(self.device) # (b, t)
+
 
         # Recover and store the target style trajectory
+        # ### FIX 2: Use the _flat (b,t) rot_vel for recover_global_motion
         style_global_motion = recover_global_motion(
             style_motion['positions'].unsqueeze(0).to(self.device),
             style_trans_vel,
-            style_rot_vel
+            style_rot_vel_flat # Use (b, t) version
         )
         style_root_trajectory = style_global_motion[:, :, 0, :].clone()
 
-        # Get content velocities and move to device
-        content_trans_vel = content_motion['trans_vel_xz'].unsqueeze(0).to(self.device)
-        content_rot_vel = content_motion['rot_vel_y'].unsqueeze(0).to(self.device).unsqueeze(-1)
 
         # --- 2. Initialize Optimization Variable ---
         X_optim_local = nn.Parameter(content_local_positions.clone(), requires_grad=True)
@@ -815,25 +819,37 @@ class MotionManifoldSynthesizer:
             optimizer.zero_grad()
 
             # --- Calculate Content Loss ---
-            foot_indices = [4, 10]
+            # This loss constrains the foot positions to match the content motion
+            foot_indices = [4, 10] # Example: LeftFoot, RightFoot
             L_content = F.mse_loss(X_optim_local[:, :, foot_indices, :], content_local_positions[:, :, foot_indices, :])
 
             # --- Calculate Style Loss ---
+            # This loss applies the style's velocities to the optimized pose
+            # and tries to match the resulting trajectory to the original style's trajectory.
+            # ### FIX 2 (cont.): Use the _flat (b,t) rot_vel for recover_global_motion
             output_global_motion = recover_global_motion(
                 X_optim_local,
                 style_trans_vel,
-                style_rot_vel
+                style_rot_vel_flat # Use (b, t) version
             )
             output_root_trajectory = output_global_motion[:, :, 0, :]
             L_style = F.mse_loss(output_root_trajectory, style_root_trajectory)
 
             # --- Calculate Manifold (Realism) Loss ---
+            # This loss ensures the resulting pose is "realistic"
             normalized_optim = (X_optim_local - self.mean_pose) / self.std
             b, t, j, d = normalized_optim.shape
             normalized_optim_flat = normalized_optim.reshape(b, t, -1)
             
-            model_input = torch.cat([normalized_optim_flat, content_trans_vel, content_rot_vel], dim=2)
+            # ### FIX 3: THE CORE BUG FIX
+            # The manifold loss MUST check for realism using the SAME velocities as the style loss (the STYLE velocities).
+            # The original code used content_trans_vel and content_rot_vel, creating a conflict.
+            # We must also unsqueeze style_rot_vel_flat to (b,t,1) for the model input.
+            model_input = torch.cat([normalized_optim_flat, style_trans_vel, style_rot_vel_flat.unsqueeze(-1)], dim=2)
+            
             reconstructed_output, _ = self.model(model_input)
+            
+            # Compare the autoencoder's output to its input
             L_manifold = F.mse_loss(reconstructed_output, model_input)
 
             # --- Total Loss and Optimization Step ---
@@ -845,6 +861,7 @@ class MotionManifoldSynthesizer:
             optimizer.step()
 
         # --- 5. Final Result ---
+        # Return the optimized local motion
         edited_motion = X_optim_local.detach().squeeze(0).cpu()
         return edited_motion
     
