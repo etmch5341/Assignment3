@@ -663,81 +663,107 @@ class MotionManifoldSynthesizer:
         mask: torch.Tensor,
         num_iterations: int = 200,
         learning_rate: float = 0.01,
-        transition_weight: float = 1.0  # New parameter for smoothness
+        transition_weight: float = 1.0,
+        foot_contact_weight: float = 2.0,
+        smoothness_weight: float = 0.5  # New parameter for jitter reduction
     ):
         """
         Completes a partially known motion sequence using manifold projection.
-        (Improved version with better initialization and transition loss)
+        (Final version with smoothness loss to reduce jitter)
         """
         self.model.eval()
         
         # --- 1. Prepare Initial Tensors ---
         mask = mask.to(self.device)
-        positions = motion_sample["positions_normalized_flat"].unsqueeze(0).to(self.device)
+        positions_norm_flat = motion_sample["positions_normalized_flat"].unsqueeze(0).to(self.device)
         trans_vel = motion_sample["trans_vel_xz"].unsqueeze(0).to(self.device)
         rot_vel = motion_sample["rot_vel_y"].unsqueeze(0).to(self.device).unsqueeze(-1)
         
-        X_known = torch.cat([positions, trans_vel, rot_vel], dim=2)
+        X_known = torch.cat([positions_norm_flat, trans_vel, rot_vel], dim=2)
         b, t, d_feat = X_known.shape
         
         mask_expanded = mask.view(1, -1, 1).expand_as(X_known)
         
         # --- 2. Smarter Initialization ---
-        # Find the last known frame index from the mask
         known_indices = (mask == 1).nonzero(as_tuple=True)[0]
         X_init = X_known * mask_expanded
         
         if len(known_indices) > 0 and known_indices.max() < t - 1:
             last_known_idx = known_indices.max()
-            # Get the data from the last known frame
             last_known_frame_data = X_known[:, last_known_idx, :].unsqueeze(1)
-            # Fill all subsequent unknown frames with this data
             X_init[:, last_known_idx + 1:, :] = last_known_frame_data.expand(-1, t - (last_known_idx + 1), -1)
 
-        X_optim = nn.Parameter(X_init, requires_grad=True)
+        X_optim_norm_flat = nn.Parameter(X_init, requires_grad=True)
 
-        # Visualization of the masked input (un-normalized)
+        # --- 3. Prepare Foot Contact Data ---
+        foot_contacts = motion_sample["foot_contacts"].unsqueeze(0).to(self.device)
+        if len(known_indices) > 0 and known_indices.max() < t - 1:
+            last_known_idx = known_indices.max()
+            last_contact_state = foot_contacts[:, last_known_idx, :]
+            foot_contacts[:, last_known_idx + 1:, :] = last_contact_state.expand(t - (last_known_idx + 1), -1)
+        
+        contact_mask = (foot_contacts > 0).float()
+        foot_indices = [4, 5, 10, 11]
+
+        # Visualization of the masked input
         original_positions = motion_sample['positions'].unsqueeze(0).to(self.device)
         viz_mask_expanded = mask.view(1, -1, 1, 1).expand_as(original_positions)
         masked_motion_viz = (original_positions * viz_mask_expanded).squeeze(0)
 
-        # --- 3. Setup Optimizer ---
-        optimizer = optim.Adam([X_optim], lr=learning_rate)
+        # --- 4. Setup Optimizer ---
+        optimizer = optim.Adam([X_optim_norm_flat], lr=learning_rate)
         
-        # --- 4. Iterative Refinement Loop ---
+        # --- 5. Iterative Refinement Loop ---
         for _ in range(num_iterations):
             optimizer.zero_grad()
             
-            X_reconstructed, _ = self.model(X_optim)
+            pos_norm_flat = X_optim_norm_flat[:, :, :positions_norm_flat.shape[2]]
+            b, t, _ = pos_norm_flat.shape
+            j, d_pos = self.mean_pose.shape
+            pos_norm = pos_norm_flat.reshape(b, t, j, d_pos)
+            X_optim_local = pos_norm * self.std + self.mean_pose
             
-            # Manifold Loss (L_recon): How plausible is the motion?
-            L_manifold = F.mse_loss(X_reconstructed * (1 - mask_expanded), X_optim * (1 - mask_expanded))
+            # --- Manifold Loss ---
+            X_reconstructed, _ = self.model(X_optim_norm_flat)
+            L_manifold = F.mse_loss(X_reconstructed * (1 - mask_expanded), X_optim_norm_flat * (1 - mask_expanded))
             
-            # --- NEW: Transition Loss ---
-            # Penalize discontinuities between known and generated frames
+            # --- Transition Loss ---
             L_transition = 0.0
             if len(known_indices) > 0 and known_indices.max() < t - 1:
                 last_known_idx = known_indices.max()
-                known_frame = X_reconstructed[:, last_known_idx, :]
-                first_unknown_frame = X_reconstructed[:, last_known_idx + 1, :]
-                L_transition = F.mse_loss(first_unknown_frame, known_frame)
-            
-            # Total loss combines manifold plausibility and transition smoothness
-            L_total = L_manifold + transition_weight * L_transition
+                known_frame_recon = X_reconstructed[:, last_known_idx, :]
+                first_unknown_frame_recon = X_reconstructed[:, last_known_idx + 1, :]
+                L_transition = F.mse_loss(first_unknown_frame_recon, known_frame_recon)
+                
+            # --- Foot Contact Loss ---
+            foot_positions_xz = X_optim_local[:, :, foot_indices][..., [0, 2]]
+            foot_velocities_xz = foot_positions_xz[:, 1:] - foot_positions_xz[:, :-1]
+            masked_foot_velocities = foot_velocities_xz * contact_mask[:, 1:, :len(foot_indices)].unsqueeze(-1)
+            L_foot = F.mse_loss(masked_foot_velocities, torch.zeros_like(masked_foot_velocities))
+
+            # --- NEW: Smoothness Loss ---
+            # Penalize the velocity of the generated part of the motion
+            velocities = X_optim_local[:, 1:] - X_optim_local[:, :-1]
+            # We only care about the unknown parts, starting from the second frame
+            smoothness_mask = (1 - mask[1:]).view(1, -1, 1, 1).expand_as(velocities)
+            L_smooth = F.mse_loss(velocities * smoothness_mask, torch.zeros_like(velocities))
+
+            # --- Total Loss ---
+            L_total = (L_manifold + 
+                    (transition_weight * L_transition) + 
+                    (foot_contact_weight * L_foot) +
+                    (smoothness_weight * L_smooth))
             
             L_total.backward()
             optimizer.step()
             
-            # Enforce constraints: Reset known frames to their ground truth values
+            # Enforce constraints
             with torch.no_grad():
-                X_optim.data.copy_(X_optim.data * (1 - mask_expanded) + X_known.data * mask_expanded)
+                X_optim_norm_flat.data.copy_(X_optim_norm_flat.data * (1 - mask_expanded) + X_known.data * mask_expanded)
 
-        # --- 5. Final Result ---
-        completed_normalized_flat = X_optim.detach()
-        pos_flat = completed_normalized_flat[:, :, :positions.shape[2]]
-        b, t, _ = pos_flat.shape
-        j, d_pos = self.mean_pose.shape
-        
+        # --- 6. Final Result ---
+        completed_normalized_flat = X_optim_norm_flat.detach()
+        pos_flat = completed_normalized_flat[:, :, :positions_norm_flat.shape[2]]
         completed_normalized = pos_flat.reshape(b, t, j, d_pos)
         completed_motion = completed_normalized * self.std + self.mean_pose
         

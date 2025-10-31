@@ -169,7 +169,9 @@ def generate_motion_examples():
                 sample_motion, 
                 inpaint_mask,
                 num_iterations=200,
-                transition_weight=1.0
+                transition_weight=1.0,
+                foot_contact_weight=2.0,
+                smoothness_weight=0.5
             )
             
             output_path = os.path.join(comp_dir, f"inpaint_{i+1:02d}_(gap_frames_{keep_size}-{window_size-keep_size}).mp4")
@@ -196,7 +198,9 @@ def generate_motion_examples():
                 sample_motion, 
                 outpaint_mask,
                 num_iterations=200,
-                transition_weight=1.0
+                transition_weight=1.0,
+                foot_contact_weight=2.0,
+                smoothness_weight=0.5
             )
             
             output_path = os.path.join(comp_dir, f"outpaint_{i+1:02d}_(extend_from_frame_{keep_frames}).mp4")
