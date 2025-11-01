@@ -229,7 +229,7 @@ def generate_motion_examples():
                 num_iterations=250,      # Can be tuned for quality vs. speed
                 learning_rate=0.01,
                 content_weight=1.0,      # As recommended in paper
-                style_weight=0.5        # As recommended in paper
+                style_weight=0.3        # As recommended in paper
             )
 
             # Get original local motions for visualization
