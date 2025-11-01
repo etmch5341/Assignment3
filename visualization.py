@@ -16,7 +16,7 @@ def visualize_style_transfer(content_motion, style_motion, result_motion, joint_
     # To keep it brief, I'll reuse the interpolation visualizer with a quick wrapper.
     # For a final submission, you might copy and paste visualize_interpolation and just change the titles.
     print(f"Generating style transfer video: {output_path}")
-    visualize_interpolation(content_motion, result_motion, style_motion, joint_parents, output_path, fps)
+    visualize_interpolation(content_motion, style_motion, result_motion, joint_parents, output_path, fps)
 
 def visualize_motion_to_video(motion_tensor, joint_parents, output_path, fps=30, view_elevation=20, view_azimuth=45):
     """

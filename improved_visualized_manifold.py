@@ -119,7 +119,7 @@ def generate_tsne_visualization(model_path, data_dir, output_file, sample_size=1
 
     plt.savefig(output_file)
     plt.close()
-    print("✅ Visualization saved!")
+    print("Visualization saved!")
 
 if __name__ == "__main__":
     generate_tsne_visualization(
