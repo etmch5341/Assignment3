@@ -46,7 +46,6 @@ def generate_tsne_visualization(model_path, data_dir, output_file, sample_size=1
     
     # --- MAPPING FOR MOTION TYPES ---
     # This map links action codes from filenames to readable categories.
-    # You may need to inspect your filenames and adjust or expand this map.
     ACTION_MAP = {
         '01': 'Walking',
         '02': 'Running/Jogging',

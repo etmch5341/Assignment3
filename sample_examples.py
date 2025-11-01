@@ -90,130 +90,130 @@ def generate_motion_examples():
     except ValueError:
         print("Warning: 'LeftFoot' joint not found. Skipping 'missing_limb' corruption.")
 
-    # # --- GENERATE INTERPOLATION VIDEOS ---
-    # print(f"\nGenerating {NUM_INTERPOLATION_VIDEOS} interpolation videos...")
-    # interp_dir = os.path.join(OUTPUT_DIR, "interpolations")
-    # for i in tqdm(range(NUM_INTERPOLATION_VIDEOS), desc="Interpolations"):
-    #     try:
-    #         # Get two different random motion indices
-    #         idx1, idx2 = random.sample(range(len(dataset)), 2)
+    # --- GENERATE INTERPOLATION VIDEOS ---
+    print(f"\nGenerating {NUM_INTERPOLATION_VIDEOS} interpolation videos...")
+    interp_dir = os.path.join(OUTPUT_DIR, "interpolations")
+    for i in tqdm(range(NUM_INTERPOLATION_VIDEOS), desc="Interpolations"):
+        try:
+            # Get two different random motion indices
+            idx1, idx2 = random.sample(range(len(dataset)), 2)
             
-    #         motion1 = dataset[idx1]
-    #         motion2 = dataset[idx2]
+            motion1 = dataset[idx1]
+            motion2 = dataset[idx2]
 
-    #         # Perform the interpolation (t=0.5 for a 50/50 blend)
-    #         interpolated_motion = synthesizer.interpolate_motions(motion1, motion2, t=0.5)
+            # Perform the interpolation (t=0.5 for a 50/50 blend)
+            interpolated_motion = synthesizer.interpolate_motions(motion1, motion2, t=0.5)
 
-    #         # Get the original local motions for visualization
-    #         motion1_local = motion1['positions']
-    #         motion2_local = motion2['positions']
+            # Get the original local motions for visualization
+            motion1_local = motion1['positions']
+            motion2_local = motion2['positions']
 
-    #         # Define output path
-    #         output_path = os.path.join(interp_dir, f"interp_{i+1:02d}_({idx1}_vs_{idx2}).mp4")
+            # Define output path
+            output_path = os.path.join(interp_dir, f"interp_{i+1:02d}_({idx1}_vs_{idx2}).mp4")
 
-    #         # Create the side-by-side-by-side video
-    #         visualize_interpolation(motion1_local, motion2_local, interpolated_motion, synthesizer.joint_parents, output_path)
+            # Create the side-by-side-by-side video
+            visualize_interpolation(motion1_local, motion2_local, interpolated_motion, synthesizer.joint_parents, output_path)
         
-    #     except Exception as e:
-    #         print(f"Error generating interpolation video {i+1}: {e}")
+        except Exception as e:
+            print(f"Error generating interpolation video {i+1}: {e}")
 
-    # # --- GENERATE CORRUPTION VIDEOS ---
-    # print(f"\nGenerating {NUM_CORRUPTION_VIDEOS} corruption video sets...")
-    # corrupt_dir = os.path.join(OUTPUT_DIR, "corruptions")
-    # for i in tqdm(range(NUM_CORRUPTION_VIDEOS), desc="Corruptions"):
-    #     try:
-    #         # Get one random motion index
-    #         idx = random.randint(0, len(dataset) - 1)
-    #         sample_motion = dataset[idx]
+    # --- GENERATE CORRUPTION VIDEOS ---
+    print(f"\nGenerating {NUM_CORRUPTION_VIDEOS} corruption video sets...")
+    corrupt_dir = os.path.join(OUTPUT_DIR, "corruptions")
+    for i in tqdm(range(NUM_CORRUPTION_VIDEOS), desc="Corruptions"):
+        try:
+            # Get one random motion index
+            idx = random.randint(0, len(dataset) - 1)
+            sample_motion = dataset[idx]
 
-    #         # Apply and fix each type of corruption to this one motion
-    #         for corruption in corruption_types:
-    #             corrupted, fixed = synthesizer.fix_corrupted_motion(
-    #                 sample_motion,
-    #                 corruption['type'],
-    #                 corruption['params']
-    #             )
+            # Apply and fix each type of corruption to this one motion
+            for corruption in corruption_types:
+                corrupted, fixed = synthesizer.fix_corrupted_motion(
+                    sample_motion,
+                    corruption['type'],
+                    corruption['params']
+                )
 
-    #             # Define output path
-    #             output_path = os.path.join(corrupt_dir, f"corr_sample_{i+1:02d}_({idx})_{corruption['name']}.mp4")
+                # Define output path
+                output_path = os.path.join(corrupt_dir, f"corr_sample_{i+1:02d}_({idx})_{corruption['name']}.mp4")
 
-    #             # Create the side-by-side comparison video
-    #             visualize_motion_comparison(corrupted, fixed, synthesizer.joint_parents, output_path)
+                # Create the side-by-side comparison video
+                visualize_motion_comparison(corrupted, fixed, synthesizer.joint_parents, output_path)
 
-    #     except Exception as e:
-    #         print(f"Error generating corruption video set {i+1}: {e}")
+        except Exception as e:
+            print(f"Error generating corruption video set {i+1}: {e}")
 
-    # # --- GENERATE MOTION COMPLETION VIDEOS (EXTRA CREDIT) ---
-    # print(f"\nGenerating Motion Completion (Extra Credit) videos...")
-    # comp_dir = os.path.join(OUTPUT_DIR, "completions")
-    # window_size = dataset.window_size # Should be 160
+    # --- GENERATE MOTION COMPLETION VIDEOS (EXTRA CREDIT) ---
+    print(f"\nGenerating Motion Completion (Extra Credit) videos...")
+    comp_dir = os.path.join(OUTPUT_DIR, "completions")
+    window_size = dataset.window_size # Should be 160
     
-    # # --- 1. In-painting (Filling Gaps) ---
-    # print(f"  Generating {NUM_INTERPOLATION_VIDEOS} in-painting (gap filling) videos...")
+    # --- 1. In-painting (Filling Gaps) ---
+    print(f"  Generating {NUM_INTERPOLATION_VIDEOS} in-painting (gap filling) videos...")
     
-    # # Create a mask to keep the start and end, but remove the middle
-    # gap_size = window_size // 2 # 80 frames
-    # keep_size = window_size // 4 # 40 frames
+    # Create a mask to keep the start and end, but remove the middle
+    gap_size = window_size // 2 # 80 frames
+    keep_size = window_size // 4 # 40 frames
     
-    # inpaint_mask = torch.zeros(window_size)
-    # inpaint_mask[:keep_size] = 1.0  # Keep first 40 frames
-    # inpaint_mask[window_size - keep_size:] = 1.0 # Keep last 40 frames
+    inpaint_mask = torch.zeros(window_size)
+    inpaint_mask[:keep_size] = 1.0  # Keep first 40 frames
+    inpaint_mask[window_size - keep_size:] = 1.0 # Keep last 40 frames
     
-    # for i in tqdm(range(NUM_INTERPOLATION_VIDEOS), desc="In-painting"):
-    #     try:
-    #         idx = random.randint(0, len(dataset) - 1)
-    #         sample_motion = dataset[idx]
+    for i in tqdm(range(NUM_INTERPOLATION_VIDEOS), desc="In-painting"):
+        try:
+            idx = random.randint(0, len(dataset) - 1)
+            sample_motion = dataset[idx]
             
-    #         # Call the new completion function
-    #         masked_viz, completed_motion = synthesizer.complete_partial_motion(
-    #             sample_motion, 
-    #             inpaint_mask,
-    #             num_iterations=200,
-    #             transition_weight=1.0,
-    #             foot_contact_weight=2.0,
-    #             smoothness_weight=0.5
-    #         )
+            # Call the new completion function
+            masked_viz, completed_motion = synthesizer.complete_partial_motion(
+                sample_motion, 
+                inpaint_mask,
+                num_iterations=200,
+                transition_weight=1.0,
+                foot_contact_weight=2.0,
+                smoothness_weight=0.5
+            )
             
-    #         output_path = os.path.join(comp_dir, f"inpaint_{i+1:02d}_(gap_frames_{keep_size}-{window_size-keep_size}).mp4")
-    #         visualize_motion_comparison(masked_viz, completed_motion, synthesizer.joint_parents, output_path)
+            output_path = os.path.join(comp_dir, f"inpaint_{i+1:02d}_(gap_frames_{keep_size}-{window_size-keep_size}).mp4")
+            visualize_motion_comparison(masked_viz, completed_motion, synthesizer.joint_parents, output_path)
             
-    #     except Exception as e:
-    #         print(f"Error generating in-painting video {i+1}: {e}")
+        except Exception as e:
+            print(f"Error generating in-painting video {i+1}: {e}")
             
-    # # --- 2. Out-painting (Extending Sequences) ---
-    # print(f"\n  Generating {NUM_INTERPOLATION_VIDEOS} out-painting (extension) videos...")
+    # --- 2. Out-painting (Extending Sequences) ---
+    print(f"\n  Generating {NUM_INTERPOLATION_VIDEOS} out-painting (extension) videos...")
     
-    # # Create a mask to keep only the first half
-    # keep_frames = window_size // 2 # Keep first 80 frames
-    # outpaint_mask = torch.zeros(window_size)
-    # outpaint_mask[:keep_frames] = 1.0
+    # Create a mask to keep only the first half
+    keep_frames = window_size // 2 # Keep first 80 frames
+    outpaint_mask = torch.zeros(window_size)
+    outpaint_mask[:keep_frames] = 1.0
     
-    # for i in tqdm(range(NUM_INTERPOLATION_VIDEOS), desc="Out-painting"):
-    #     try:
-    #         idx = random.randint(0, len(dataset) - 1)
-    #         sample_motion = dataset[idx]
+    for i in tqdm(range(NUM_INTERPOLATION_VIDEOS), desc="Out-painting"):
+        try:
+            idx = random.randint(0, len(dataset) - 1)
+            sample_motion = dataset[idx]
             
-    #         # Call the new completion function
-    #         masked_viz, completed_motion = synthesizer.complete_partial_motion(
-    #             sample_motion, 
-    #             outpaint_mask,
-    #             num_iterations=200,
-    #             transition_weight=1.0,
-    #             foot_contact_weight=2.0,
-    #             smoothness_weight=0.5
-    #         )
+            # Call the new completion function
+            masked_viz, completed_motion = synthesizer.complete_partial_motion(
+                sample_motion, 
+                outpaint_mask,
+                num_iterations=200,
+                transition_weight=1.0,
+                foot_contact_weight=2.0,
+                smoothness_weight=0.5
+            )
             
-    #         output_path = os.path.join(comp_dir, f"outpaint_{i+1:02d}_(extend_from_frame_{keep_frames}).mp4")
-    #         visualize_motion_comparison(masked_viz, completed_motion, synthesizer.joint_parents, output_path)
+            output_path = os.path.join(comp_dir, f"outpaint_{i+1:02d}_(extend_from_frame_{keep_frames}).mp4")
+            visualize_motion_comparison(masked_viz, completed_motion, synthesizer.joint_parents, output_path)
             
-    #     except Exception as e:
-    #         print(f"Error generating out-painting video {i+1}: {e}")
+        except Exception as e:
+            print(f"Error generating out-painting video {i+1}: {e}")
             
     # --- GENERATE STYLE TRANSFER VIDEOS (EXTRA CREDIT) ---
     print(f"\nGenerating Motion Style Transfer (Extra Credit) videos...")
     style_dir = os.path.join(OUTPUT_DIR, "style_transfer")
     os.makedirs(style_dir, exist_ok=True)
-    NUM_STYLE_VIDEOS = 3 # As requested by the assignment
+    NUM_STYLE_VIDEOS = 3 
 
     for i in tqdm(range(NUM_STYLE_VIDEOS), desc="Style Transfer Videos"):
         try:
