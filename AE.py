@@ -781,29 +781,32 @@ class MotionManifoldSynthesizer:
     ):
         """
         Transfers the style of one motion to the content of another via optimization.
-        (FIXED version)
+        (FIXED version 2.0 - Correct Content Loss)
         """
         self.model.eval()
 
-        # --- 1. Prepare Target Tensors (Move to device *before* the loop) ---
+        # --- 1. Prepare Target Tensors ---
         content_local_positions = content_motion['positions'].unsqueeze(0).to(self.device)
         
-        # ### FIX 1: Load all velocities, keeping names clear for flat (b,t) vs. model-ready (b,t,f)
-        # Get style velocities and move to device
-        style_trans_vel = style_motion['trans_vel_xz'].unsqueeze(0).to(self.device)     # (b, t, 2)
-        style_rot_vel_flat = style_motion['rot_vel_y'].unsqueeze(0).to(self.device)     # (b, t)
+        # ### NEW: Get foot contact data for the content motion ###
+        content_foot_contacts = content_motion['foot_contacts'].unsqueeze(0).to(self.device)
+        foot_indices = [4, 5, 10, 11] # LFoot, LToe, RFoot, RToe
+        # Create a mask for frames where feet are on the ground (contact > 0)
+        contact_mask = (content_foot_contacts > 0).float()
         
-        # Get content velocities and move to device
-        content_trans_vel = content_motion['trans_vel_xz'].unsqueeze(0).to(self.device) # (b, t, 2)
-        content_rot_vel_flat = content_motion['rot_vel_y'].unsqueeze(0).to(self.device) # (b, t)
+        # Get style velocities
+        style_trans_vel = style_motion['trans_vel_xz'].unsqueeze(0).to(self.device)
+        style_rot_vel_flat = style_motion['rot_vel_y'].unsqueeze(0).to(self.device)
+        
+        # Get content velocities (for manifold loss)
+        content_trans_vel = content_motion['trans_vel_xz'].unsqueeze(0).to(self.device)
+        content_rot_vel_flat = content_motion['rot_vel_y'].unsqueeze(0).to(self.device)
 
-
-        # Recover and store the target style trajectory
-        # ### FIX 2: Use the _flat (b,t) rot_vel for recover_global_motion
+        # Recover target style trajectory
         style_global_motion = recover_global_motion(
             style_motion['positions'].unsqueeze(0).to(self.device),
             style_trans_vel,
-            style_rot_vel_flat # Use (b, t) version
+            style_rot_vel_flat
         )
         style_root_trajectory = style_global_motion[:, :, 0, :].clone()
 
@@ -818,34 +821,42 @@ class MotionManifoldSynthesizer:
         for _ in range(num_iterations):
             optimizer.zero_grad()
 
-            # --- Calculate Content Loss ---
-            # This loss constrains the foot positions to match the content motion
-            foot_indices = [4, 10] # Example: LeftFoot, RightFoot
-            L_content = F.mse_loss(X_optim_local[:, :, foot_indices, :], content_local_positions[:, :, foot_indices, :])
-
-            # --- Calculate Style Loss ---
-            # This loss applies the style's velocities to the optimized pose
-            # and tries to match the resulting trajectory to the original style's trajectory.
-            # ### FIX 2 (cont.): Use the _flat (b,t) rot_vel for recover_global_motion
+            # --- Reconstruct Global Motion of Optimized Pose (using STYLE velocities) ---
+            # This is needed for both Style and Content loss
             output_global_motion = recover_global_motion(
                 X_optim_local,
                 style_trans_vel,
-                style_rot_vel_flat # Use (b, t) version
+                style_rot_vel_flat
             )
+
+            # --- Calculate Content Loss (Foot Contact) ---
+            # ### FIX: This is the NEW, correct content loss ###
+            # It replaces the old local-position-based loss.
+            # Get the XZ positions of the optimized foot joints (now in global space)
+            foot_positions_xz = output_global_motion[:, :, foot_indices][..., [0, 2]]
+            # Calculate their velocity (frame-to-frame change)
+            foot_velocities_xz = foot_positions_xz[:, 1:] - foot_positions_xz[:, :-1]
+            # Apply the content's contact mask: we only care about velocities on frames
+            # where the content foot was planted.
+            masked_foot_velocities = foot_velocities_xz * contact_mask[:, 1:, :len(foot_indices)].unsqueeze(-1)
+            # The loss is to minimize this velocity (i.e., force feet to be still when they should be)
+            L_content = F.mse_loss(masked_foot_velocities, torch.zeros_like(masked_foot_velocities))
+
+            # --- Calculate Style Loss (Root Trajectory) ---
+            # This loss is fine as-is.
             output_root_trajectory = output_global_motion[:, :, 0, :]
             L_style = F.mse_loss(output_root_trajectory, style_root_trajectory)
 
             # --- Calculate Manifold (Realism) Loss ---
-            # This loss ensures the resulting pose is "realistic"
+            # This loss ensures the optimized POSE (X_optim_local) is realistic.
+            # We must use the CONTENT velocities, as they correspond to the pose we're optimizing.
             normalized_optim = (X_optim_local - self.mean_pose) / self.std
             b, t, j, d = normalized_optim.shape
             normalized_optim_flat = normalized_optim.reshape(b, t, -1)
             
-            # ### FIX 3: THE CORE BUG FIX
-            # The manifold loss MUST check for realism using the SAME velocities as the style loss (the STYLE velocities).
-            # The original code used content_trans_vel and content_rot_vel, creating a conflict.
-            # We must also unsqueeze style_rot_vel_flat to (b,t,1) for the model input.
-            model_input = torch.cat([normalized_optim_flat, style_trans_vel, style_rot_vel_flat.unsqueeze(-1)], dim=2)
+            # ### FIX: This now correctly uses CONTENT velocities ###
+            # This fixes the logical error from the previous patch.
+            model_input = torch.cat([normalized_optim_flat, content_trans_vel, content_rot_vel_flat.unsqueeze(-1)], dim=2)
             
             reconstructed_output, _ = self.model(model_input)
             
