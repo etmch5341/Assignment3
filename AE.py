@@ -665,11 +665,10 @@ class MotionManifoldSynthesizer:
         learning_rate: float = 0.01,
         transition_weight: float = 1.0,
         foot_contact_weight: float = 2.0,
-        smoothness_weight: float = 0.5  # New parameter for jitter reduction
+        smoothness_weight: float = 0.5
     ):
         """
         Completes a partially known motion sequence using manifold projection.
-        (Final version with smoothness loss to reduce jitter)
         """
         self.model.eval()
         
@@ -773,12 +772,6 @@ class MotionManifoldSynthesizer:
         """
         Computes the Gram matrix for a batch of latent representations.
         The Gram matrix captures style as the correlation between features over time.
-        
-        Args:
-            H: Latent representation tensor from the encoder, shape (batch, features, time).
-        
-        Returns:
-            Gram matrix tensor of shape (batch, features, features).
         """
         b, m, t = H.shape
         # Perform batched matrix multiplication: (b, m, t) @ (b, t, m) -> (b, m, m)
@@ -800,17 +793,6 @@ class MotionManifoldSynthesizer:
         from "A Deep Learning Framework for Character Motion Synthesis and Editing."
 
         This is an optimization-based approach in the latent space of the autoencoder.
-
-        Args:
-            content_motion: The motion dictionary providing the content (path, timing).
-            style_motion: The motion dictionary providing the style (posture, dynamics).
-            num_iterations: Number of optimization steps.
-            learning_rate: Learning rate for the Adam optimizer.
-            content_weight: Weight for the content loss term (c in the paper).
-            style_weight: Weight for the style loss term (s in the paper).
-
-        Returns:
-            The resulting stylized motion as a tensor of shape [frames, joints, 3].
         """
         self.model.eval()
 

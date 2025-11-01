@@ -164,7 +164,6 @@ def generate_motion_examples():
             idx = random.randint(0, len(dataset) - 1)
             sample_motion = dataset[idx]
             
-            # Call the new completion function
             masked_viz, completed_motion = synthesizer.complete_partial_motion(
                 sample_motion, 
                 inpaint_mask,
@@ -193,7 +192,6 @@ def generate_motion_examples():
             idx = random.randint(0, len(dataset) - 1)
             sample_motion = dataset[idx]
             
-            # Call the new completion function
             masked_viz, completed_motion = synthesizer.complete_partial_motion(
                 sample_motion, 
                 outpaint_mask,
@@ -240,7 +238,7 @@ def generate_motion_examples():
             output_path = os.path.join(style_dir, f"style_transfer_{i+1:02d}_(content_{content_idx}_style_{style_idx}).mp4")
 
             # Create the three-panel visualization
-            # This function is in visualization.py and reuses the interpolation visualizer
+            # Reuses the interpolation visualizer
             visualize_style_transfer(
                 content_motion_local, # Displayed on the left
                 style_motion_local,   # Displayed on the right
